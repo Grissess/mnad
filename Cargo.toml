@@ -1,0 +1,8 @@
+[package]
+name = "mnad"
+version = "0.1.0"
+authors = ["Graham Northup <grissess@nexusg.org>"]
+edition = "2018"
+
+[dependencies]
+rlapack = "0.0.5"
