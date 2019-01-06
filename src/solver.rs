@@ -12,7 +12,7 @@ pub struct MatrixBuilder<S: Scalar> {
     matrix: Vec<S>,
 }
 
-#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+#[derive(Debug,Clone,PartialEq,Eq)]
 pub enum MatrixError {
     Overflow,
     Singular{idx: usize},
@@ -118,6 +118,7 @@ impl<S: Scalar> MatrixBuilder<S> {
     }
 }
 
+#[derive(Debug,Clone)]
 pub struct MatrixEvaluator<S: Scalar> {
     dirty: bool,
     nodes: usize,
