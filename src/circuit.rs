@@ -2,7 +2,7 @@ use self::ns::*;
 use self::solver::*;
 use super::*;
 
-use std::cell::RefCell;
+use std::cell::{RefCell, Ref, RefMut};
 use std::rc::{Rc, Weak};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,9 +104,18 @@ impl<S: Scalar> Bipole<S> {
     }
 }
 
+pub struct BipoleRef<S: Scalar>(pub Rc<RefCell<Bipole<S>>>);
+
+impl<S: Scalar> BipoleRef<S> {
+    pub fn borrow(&self) -> Ref<Bipole<S>> { self.0.borrow() }
+
+    pub fn borrow_mut(&self) -> RefMut<Bipole<S>> { self.0.borrow_mut() }
+}
+
 #[derive(Debug)]
 pub struct Circuit<S: Scalar> {
-    bipoles: Vec<Bipole<S>>,
+    bipoles: Vec<Rc<RefCell<Bipole<S>>>>,
+    myself: Option<Rc<RefCell<Circuit<S>>>>,
     vsns: LinearNamespace,
     ndns: LinearNamespace,
     builder: MatrixBuilder<S>,
@@ -115,7 +124,49 @@ pub struct Circuit<S: Scalar> {
     need_build: bool,
 }
 
+#[derive(Debug)]
+pub struct CircuitRef<S: Scalar>(pub Rc<RefCell<Circuit<S>>>);
+
+impl<S: Scalar> CircuitRef<S> {
+    pub fn borrow(&self) -> Ref<Circuit<S>> { self.0.borrow() }
+
+    pub fn borrow_mut(&self) -> RefMut<Circuit<S>> { self.0.borrow_mut() }
+}
+
 impl<S: Scalar> Circuit<S> {
+    pub fn new() -> Result<CircuitRef<S>, CircuitError> {
+        let builder = MatrixBuilder::new(0, 0)?;
+
+        let circuit = Rc::new(RefCell::new(Circuit {
+            bipoles: Vec::new(),
+            myself: None,
+            vsns: LinearNamespace::new(),
+            ndns: LinearNamespace::new(),
+            builder: builder.clone(),
+            eval: builder.clone().build()?,
+            need_lin: false,
+            need_build: false,
+        }));
+
+        let circuit2 = circuit.clone();
+        (*circuit.borrow_mut()).myself = Some(circuit2);
+        Ok(CircuitRef(circuit))
+    }
+
+    pub fn myself(&self) -> CircuitRef<S> { CircuitRef(self.myself.as_ref().expect("found a circuit with invalid `myself`").clone()) }
+
+    pub fn add(&mut self, kind: BipoleKind<S>) -> BipoleRef<S> {
+        let bp = Rc::new(RefCell::new(Bipole {
+            pos: self.alloc_pin(),
+            neg: self.alloc_pin(),
+            vsid: if let BipoleKind::VoltageSource(_) = kind { Some(self.alloc_vsid()) } else { None },
+            kind: kind,
+            circuit: Rc::downgrade(&self.myself().0),
+        }));
+        self.bipoles.push(bp.clone());
+        BipoleRef(bp)
+    }
+
     fn need_lin(&mut self) {
         self.need_lin = true;
         self.need_build = true;
@@ -127,8 +178,12 @@ impl<S: Scalar> Circuit<S> {
 
     fn update(&mut self) -> Result<(), CircuitError> {
         if self.need_lin {
-            self.vsns.linearize();
-            self.ndns.linearize();
+            let sources = self.vsns.linearize();
+            let nodes = self.ndns.linearize();
+            self.builder = MatrixBuilder::new(nodes, sources)?;
+            for bp in &self.bipoles {
+                self.apply_effect(&*bp.borrow());
+            }
         }
 
         if self.need_build {
@@ -148,59 +203,63 @@ impl<S: Scalar> Circuit<S> {
         Pin(Some(self.ndns.next()))
     }
 
-    fn apply_effect(&mut self, bp: &Bipole<S>) {
+    fn apply_effect(&self, bp: &Bipole<S>) {
+        let myself = self.myself();
+        let mut me = myself.borrow_mut();
         match bp.kind() {
             &BipoleKind::Resistor(r) => {
-                self.need_build();
+                me.need_build();
                 match (bp.pos().id(), bp.neg().id()) {
-                    (Some(p), Some(n)) => self.builder.add_conductance(p, Some(n), r.recip()),
-                    (Some(p), None) => self.builder.add_conductance(p, None, r.recip()),
-                    (None, Some(n)) => self.builder.add_conductance(n, None, r.recip()),
+                    (Some(p), Some(n)) => me.builder.add_conductance(p, Some(n), r.recip()),
+                    (Some(p), None) => me.builder.add_conductance(p, None, r.recip()),
+                    (None, Some(n)) => me.builder.add_conductance(n, None, r.recip()),
                     (None, None) => (),
                 }
             }
             &BipoleKind::VoltageSource(v) => {
-                self.update();
+                me.update();
                 if let Some(vsid) = bp.vsid().map(Name::id) {
-                    self.eval.add_potential(vsid, v);
+                    me.eval.add_potential(vsid, v);
                 }
             }
             &BipoleKind::CurrentSource(i) => {
-                self.update();
+                me.update();
                 if let Some(p) = bp.pos().id() {
-                    self.eval.add_current(p, i);
+                    me.eval.add_current(p, i);
                 }
                 if let Some(n) = bp.neg().id() {
-                    self.eval.add_current(n, -i);
+                    me.eval.add_current(n, -i);
                 }
             }
         }
     }
 
-    fn repeal_effect(&mut self, bp: &Bipole<S>) {
+    fn repeal_effect(&self, bp: &Bipole<S>) {
+        let myself = self.myself();
+        let mut me = myself.borrow_mut();
         match bp.kind() {
             &BipoleKind::Resistor(r) => {
-                self.need_build();
+                me.need_build();
                 match (bp.pos().id(), bp.neg.id()) {
-                    (Some(p), Some(n)) => self.builder.add_conductance(p, Some(n), -r.recip()),
-                    (Some(p), None) => self.builder.add_conductance(p, None, -r.recip()),
-                    (None, Some(n)) => self.builder.add_conductance(n, None, -r.recip()),
+                    (Some(p), Some(n)) => me.builder.add_conductance(p, Some(n), -r.recip()),
+                    (Some(p), None) => me.builder.add_conductance(p, None, -r.recip()),
+                    (None, Some(n)) => me.builder.add_conductance(n, None, -r.recip()),
                     (None, None) => (),
                 }
             }
             &BipoleKind::VoltageSource(v) => {
-                self.update();
+                me.update();
                 if let Some(vsid) = bp.vsid().map(Name::id) {
-                    self.eval.add_potential(vsid, -v);
+                    me.eval.add_potential(vsid, -v);
                 }
             }
             &BipoleKind::CurrentSource(i) => {
-                self.update();
+                me.update();
                 if let Some(p) = bp.pos().id() {
-                    self.eval.add_current(p, -i);
+                    me.eval.add_current(p, -i);
                 }
                 if let Some(n) = bp.neg().id() {
-                    self.eval.add_current(n, i);
+                    me.eval.add_current(n, i);
                 }
             }
         }

@@ -1,4 +1,5 @@
 use self::solver::*;
+use self::circuit::*;
 use super::*;
 
 use std::time;
@@ -29,4 +30,9 @@ fn ohms_law_f32() -> Result<(), MatrixError> {
 #[test]
 fn ohms_law_f64() -> Result<(), MatrixError> {
     ohms_law::<f64>()
+}
+
+#[test]
+fn basic_circuit() -> Result<(), CircuitError> {
+    unimplemented!();
 }

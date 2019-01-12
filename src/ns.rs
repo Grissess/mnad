@@ -53,7 +53,7 @@ impl LinearNamespace {
         Name(RefCell::new(nm), self.reorder_fn.clone())
     }
 
-    pub fn linearize(&mut self) {
+    pub fn linearize(&mut self) -> usize {
         let new_grants = self
             .grants
             .iter()
@@ -69,6 +69,7 @@ impl LinearNamespace {
         }
         self.grants = new_grants.iter().map(Rc::downgrade).collect();
         self.next = self.grants.len();
+        self.next
     }
 
     pub fn names(&self) -> Vec<Name> {
