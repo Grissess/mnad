@@ -1,5 +1,5 @@
-use super::*;
 use self::solver::*;
+use super::*;
 
 use std::time;
 
@@ -23,6 +23,10 @@ fn ohms_law<S: Scalar>() -> Result<(), MatrixError> {
 }
 
 #[test]
-fn ohms_law_f32() -> Result<(), MatrixError> { ohms_law::<f32>() }
+fn ohms_law_f32() -> Result<(), MatrixError> {
+    ohms_law::<f32>()
+}
 #[test]
-fn ohms_law_f64() -> Result<(), MatrixError> { ohms_law::<f64>() }
+fn ohms_law_f64() -> Result<(), MatrixError> {
+    ohms_law::<f64>()
+}

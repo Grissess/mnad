@@ -6,3 +6,5 @@ edition = "2018"
 
 [dependencies]
 rlapack = "0.0.5"
+libc = "0.2.46"
+derivative = "1.0.2"

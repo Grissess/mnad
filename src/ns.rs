@@ -1,23 +1,40 @@
-use std::rc::{Weak, Rc};
-use std::cell::Cell;
+use derivative::Derivative;
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 
-pub trait ReorderFn: FnMut(usize, usize) {}
-pub type ReorderFnP = fn(&mut self, usize, usize);
-pub type LinearNamespaceFnP = LinearNamespace<ReorderFnP>;
-pub type NameFnP = Name<ReorderFnP>;
+pub type RF = Rc<dyn Fn(usize, usize)>;
 
-#[derive(Debug)]
-pub struct LinearNamespace<R: ReorderFn> {
-    next: usize,
-    grants: Vec<Weak<Cell<usize>>>,
-    reorder_fn: Option<R>,
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub struct Name(
+    RefCell<Rc<Cell<usize>>>,
+    #[derivative(Debug = "ignore")] Option<RF>,
+);
+
+impl Name {
+    pub fn id(&self) -> usize {
+        self.0.borrow().get()
+    }
+
+    pub fn unify(&self, other: &Name) {
+        if let Some(ref f) = self.1 {
+            f(self.0.borrow().get(), other.0.borrow().get());
+        }
+        *self.0.borrow_mut() = other.0.borrow().clone();
+    }
 }
 
-#[derive(Debug)]
-pub struct Name<R: ReorderFn>(Rc<Cell<usize>>, Option<R>);
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub struct LinearNamespace {
+    next: usize,
+    grants: Vec<Weak<Cell<usize>>>,
+    #[derivative(Debug = "ignore")]
+    reorder_fn: Option<RF>,
+}
 
-impl<R: ReorderFn> LinearNamespace<R> {
-    pub fn new() -> LinearNamespace<R> {
+impl LinearNamespace {
+    pub fn new() -> LinearNamespace {
         LinearNamespace {
             next: 0,
             grants: Vec::new(),
@@ -25,42 +42,42 @@ impl<R: ReorderFn> LinearNamespace<R> {
         }
     }
 
-    pub fn set_reorder_fn(&mut self, reorder_fn: Option<R>) {
+    pub fn set_reorder_fn(&mut self, reorder_fn: Option<RF>) {
         self.reorder_fn = reorder_fn;
     }
 
-    pub fn next(&mut self) -> Name<R> {
+    pub fn next(&mut self) -> Name {
         let nm = Rc::new(Cell::new(self.next));
         self.next += 1;
         self.grants.push(Rc::downgrade(&nm));
-        Name(nm, self.reorder_fn)
+        Name(RefCell::new(nm), self.reorder_fn.clone())
     }
 
     pub fn linearize(&mut self) {
-        let new_grants = self.grants.iter().map(Weak::upgrade).filter(Option::is_some).map(Option::unwrap).collect::<Vec<_>>();
+        let new_grants = self
+            .grants
+            .iter()
+            .map(Weak::upgrade)
+            .filter(Option::is_some)
+            .map(Option::unwrap)
+            .collect::<Vec<_>>();
         for (idx, nm) in new_grants.iter().enumerate() {
-            if let Some(f) = self.reorder_fn {
+            if let Some(ref f) = self.reorder_fn {
                 f(nm.get(), idx);
             }
             nm.set(idx);
         }
         self.grants = new_grants.iter().map(Rc::downgrade).collect();
+        self.next = self.grants.len();
     }
 
-    pub fn names(&self) -> Vec<Name<R>> {
-        self.grants.iter().map(Weak::upgrade).filter(Option::is_some).map(Option::unwrap).map(|x| Name(x, self.reorder_fn)).collect()
-    }
-}
-
-impl<R: ReorderFn> Name<R> {
-    pub fn id(&self) -> usize {
-        self.0.get()
-    }
-
-    pub fn unify(&mut self, other: &Name<R>) {
-        if let Some(f) = self.1 {
-            f(self.0.get(), other.0.get());
-        }
-        self.0 = Rc::clone(&other.0);
+    pub fn names(&self) -> Vec<Name> {
+        self.grants
+            .iter()
+            .map(Weak::upgrade)
+            .filter(Option::is_some)
+            .map(Option::unwrap)
+            .map(|x| Name(RefCell::new(x), self.reorder_fn.clone()))
+            .collect()
     }
 }

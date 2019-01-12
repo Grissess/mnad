@@ -1,21 +1,23 @@
-use super::*;
 use self::ns::*;
 use self::solver::*;
+use super::*;
 
-use std::rc::{Weak, Rc};
 use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 
-#[derive(Debug,Clone,PartialEq,Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CircuitError {
     MatrixError(MatrixError),
     CircuitDead,
 }
 
 impl From<MatrixError> for CircuitError {
-    fn from(v: MatrixError) -> CircuitError { CircuitError::MatrixError(v) }
+    fn from(v: MatrixError) -> CircuitError {
+        CircuitError::MatrixError(v)
+    }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub enum BipoleKind<S: Scalar> {
     Resistor(S),
     VoltageSource(S),
@@ -23,17 +25,23 @@ pub enum BipoleKind<S: Scalar> {
 }
 
 #[derive(Debug)]
-pub struct Pin(Option<NameFnP>);
+pub struct Pin(Option<Name>);
 
 impl Pin {
-    pub fn ground() -> Pin { Pin(None) }
-    pub fn is_ground(&self) -> bool { self.0.is_none() }
+    pub fn ground() -> Pin {
+        Pin(None)
+    }
+    pub fn is_ground(&self) -> bool {
+        self.0.is_none()
+    }
 
-    pub fn id(&self) -> Option<usize> { self.0.map(Name::id) }
+    pub fn id(&self) -> Option<usize> {
+        self.0.as_ref().map(Name::id)
+    }
 
     pub fn connect(&mut self, other: &mut Pin) {
-        match (self.0, other.0) {
-            (Some(ref mut a), Some(ref b)) => a.unify(b),
+        match (&mut self.0, &other.0) {
+            (Some(a), Some(b)) => a.unify(b),
             (Some(_), None) => self.0 = None,
             (None, Some(_)) => other.0 = None,
             (None, None) => (),
@@ -45,20 +53,32 @@ impl Pin {
 pub struct Bipole<S: Scalar> {
     pos: Pin,
     neg: Pin,
-    vsid: Option<NameFnP>,
+    vsid: Option<Name>,
     kind: BipoleKind<S>,
     circuit: Weak<RefCell<Circuit<S>>>,
 }
 
 impl<S: Scalar> Bipole<S> {
-    pub fn pos(&mut self) -> &mut Pin { &mut self.pos }
-    pub fn neg(&mut self) -> &mut Pin { &mut self.neg }
-    pub fn vsid(&self) -> Option<&NameFnP> { (&self.vsid).as_ref() }
-    pub fn kind(&self) -> &BipoleKind<S> { &self.kind }
-    pub fn circuit(&self) -> Option<Rc<RefCell<Circuit<S>>>> { self.circuit.upgrade() }
+    pub fn pos(&self) -> &Pin {
+        &self.pos
+    }
+    pub fn neg(&self) -> &Pin {
+        &self.neg
+    }
+    pub fn vsid(&self) -> Option<&Name> {
+        self.vsid.as_ref()
+    }
+    pub fn kind(&self) -> &BipoleKind<S> {
+        &self.kind
+    }
+    pub fn circuit(&self) -> Option<Rc<RefCell<Circuit<S>>>> {
+        self.circuit.upgrade()
+    }
 
-    pub fn set_kind(&mut self, kind: BipoleKind<S>) -> Result<(), CircuitError>{
-        let mut circuit = self.circuit().ok_or(CircuitError::CircuitDead)?.borrow_mut();
+    pub fn set_kind(&mut self, kind: BipoleKind<S>) -> Result<(), CircuitError> {
+        let circuit_cell: Rc<RefCell<_>> = self.circuit().ok_or(CircuitError::CircuitDead)?;
+
+        let mut circuit = circuit_cell.borrow_mut();
 
         circuit.repeal_effect(&self);
 
@@ -77,7 +97,7 @@ impl<S: Scalar> Bipole<S> {
                 None => self.vsid = Some(circuit.alloc_vsid()),
             }
         }
-        
+
         circuit.apply_effect(&self);
 
         Ok(())
@@ -87,8 +107,8 @@ impl<S: Scalar> Bipole<S> {
 #[derive(Debug)]
 pub struct Circuit<S: Scalar> {
     bipoles: Vec<Bipole<S>>,
-    vsns: LinearNamespaceFnP,
-    ndns: LinearNamespaceFnP,
+    vsns: LinearNamespace,
+    ndns: LinearNamespace,
     builder: MatrixBuilder<S>,
     eval: MatrixEvaluator<S>,
     need_lin: bool,
@@ -118,7 +138,7 @@ impl<S: Scalar> Circuit<S> {
         Ok(())
     }
 
-    fn alloc_vsid(&mut self) -> NameFnP {
+    fn alloc_vsid(&mut self) -> Name {
         self.need_lin();
         self.vsns.next()
     }
@@ -138,13 +158,13 @@ impl<S: Scalar> Circuit<S> {
                     (None, Some(n)) => self.builder.add_conductance(n, None, r.recip()),
                     (None, None) => (),
                 }
-            },
+            }
             &BipoleKind::VoltageSource(v) => {
                 self.update();
                 if let Some(vsid) = bp.vsid().map(Name::id) {
                     self.eval.add_potential(vsid, v);
                 }
-            },
+            }
             &BipoleKind::CurrentSource(i) => {
                 self.update();
                 if let Some(p) = bp.pos().id() {
@@ -153,7 +173,7 @@ impl<S: Scalar> Circuit<S> {
                 if let Some(n) = bp.neg().id() {
                     self.eval.add_current(n, -i);
                 }
-            },
+            }
         }
     }
 
@@ -167,13 +187,13 @@ impl<S: Scalar> Circuit<S> {
                     (None, Some(n)) => self.builder.add_conductance(n, None, -r.recip()),
                     (None, None) => (),
                 }
-            },
+            }
             &BipoleKind::VoltageSource(v) => {
                 self.update();
                 if let Some(vsid) = bp.vsid().map(Name::id) {
                     self.eval.add_potential(vsid, -v);
                 }
-            },
+            }
             &BipoleKind::CurrentSource(i) => {
                 self.update();
                 if let Some(p) = bp.pos().id() {
@@ -182,7 +202,7 @@ impl<S: Scalar> Circuit<S> {
                 if let Some(n) = bp.neg().id() {
                     self.eval.add_current(n, i);
                 }
-            },
+            }
         }
     }
 }

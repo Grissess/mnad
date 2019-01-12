@@ -2,21 +2,21 @@ use super::*;
 
 use std::iter;
 
-use rlapack::ll::{__CLPK_integer, __CLPK_real, __CLPK_doublereal};
-use libc::{c_int, c_char};
+use libc::{c_char, c_int};
+use rlapack::ll::{__CLPK_doublereal, __CLPK_integer, __CLPK_real};
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct MatrixBuilder<S: Scalar> {
     nodes: usize,
     stride: usize,
     matrix: Vec<S>,
 }
 
-#[derive(Debug,Clone,PartialEq,Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatrixError {
     Overflow,
-    Singular{idx: usize},
-    BadArg{idx: usize},
+    Singular { idx: usize },
+    BadArg { idx: usize },
 }
 
 impl<S: Scalar> MatrixBuilder<S> {
@@ -25,16 +25,24 @@ impl<S: Scalar> MatrixBuilder<S> {
         Ok(MatrixBuilder {
             nodes: nodes,
             stride: size,
-            matrix: iter::repeat(S::zero()).take(
-                size.checked_mul(size).ok_or(MatrixError::Overflow)?
-            ).collect::<Vec<S>>(),
+            matrix: iter::repeat(S::zero())
+                .take(size.checked_mul(size).ok_or(MatrixError::Overflow)?)
+                .collect::<Vec<S>>(),
         })
     }
 
-    pub fn nodes(&self) -> usize { self.nodes }
-    pub fn sources(&self) -> usize { self.stride - self.nodes }
-    pub fn size(&self) -> usize { self.stride }
-    pub fn matrix(&self) -> Vec<S> { self.matrix.clone() }
+    pub fn nodes(&self) -> usize {
+        self.nodes
+    }
+    pub fn sources(&self) -> usize {
+        self.stride - self.nodes
+    }
+    pub fn size(&self) -> usize {
+        self.stride
+    }
+    pub fn matrix(&self) -> Vec<S> {
+        self.matrix.clone()
+    }
 
     pub fn add_conductance(&mut self, a: usize, b: Option<usize>, c: S) {
         self.matrix[a * self.stride + a] += c;
@@ -74,7 +82,7 @@ impl<S: Scalar> MatrixBuilder<S> {
         let mut piv: Vec<c_int> = iter::repeat(0).take(self.stride).collect();
         let mut info: c_int = 0;
 
-        unsafe { 
+        unsafe {
             match S::precision() {
                 Precision::Single => {
                     rlapack::ll::sgetrf_(
@@ -83,9 +91,9 @@ impl<S: Scalar> MatrixBuilder<S> {
                         self.matrix.as_mut_ptr() as *mut __CLPK_real,
                         &mut lda as *mut __CLPK_integer,
                         piv.as_mut_ptr() as *mut __CLPK_integer,
-                        &mut info as *mut __CLPK_integer
+                        &mut info as *mut __CLPK_integer,
                     );
-                },
+                }
                 Precision::Double => {
                     rlapack::ll::dgetrf_(
                         &mut m as *mut __CLPK_integer,
@@ -93,17 +101,21 @@ impl<S: Scalar> MatrixBuilder<S> {
                         self.matrix.as_mut_ptr() as *mut __CLPK_doublereal,
                         &mut lda as *mut __CLPK_integer,
                         piv.as_mut_ptr() as *mut __CLPK_integer,
-                        &mut info as *mut __CLPK_integer
+                        &mut info as *mut __CLPK_integer,
                     );
-                },
+                }
             }
         }
 
         if info < 0 {
-            return Err(MatrixError::BadArg{idx: (-info) as usize});
+            return Err(MatrixError::BadArg {
+                idx: (-info) as usize,
+            });
         }
         if info > 0 {
-            return Err(MatrixError::Singular{idx: (info - 1) as usize});
+            return Err(MatrixError::Singular {
+                idx: (info - 1) as usize,
+            });
         }
 
         Ok(MatrixEvaluator {
@@ -118,7 +130,7 @@ impl<S: Scalar> MatrixBuilder<S> {
     }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct MatrixEvaluator<S: Scalar> {
     dirty: bool,
     nodes: usize,
@@ -130,8 +142,12 @@ pub struct MatrixEvaluator<S: Scalar> {
 }
 
 impl<S: Scalar> MatrixEvaluator<S> {
-    pub fn nodes(&self) -> usize { self.nodes }
-    pub fn sources(&self) -> usize { self.stride - self.nodes }
+    pub fn nodes(&self) -> usize {
+        self.nodes
+    }
+    pub fn sources(&self) -> usize {
+        self.stride - self.nodes
+    }
 
     pub fn add_current(&mut self, node: usize, i: S) {
         self.known[node] += i;
@@ -152,22 +168,30 @@ impl<S: Scalar> MatrixEvaluator<S> {
     }
 
     pub fn get_potential(&mut self, node: usize) -> Result<S, MatrixError> {
-        if self.dirty { self.solve()?; }
+        if self.dirty {
+            self.solve()?;
+        }
         Ok(self.out[node])
     }
 
     pub fn node_potentials(&mut self) -> Result<&mut [S], MatrixError> {
-        if self.dirty { self.solve()?; }
+        if self.dirty {
+            self.solve()?;
+        }
         Ok(&mut self.out[..self.nodes])
     }
 
     pub fn get_current(&mut self, src: usize) -> Result<S, MatrixError> {
-        if self.dirty { self.solve()?; }
+        if self.dirty {
+            self.solve()?;
+        }
         Ok(self.out[self.nodes + src])
     }
 
     pub fn src_currents(&mut self) -> Result<&mut [S], MatrixError> {
-        if self.dirty { self.solve()?; }
+        if self.dirty {
+            self.solve()?;
+        }
         Ok(&mut self.out[self.nodes..])
     }
 
@@ -194,7 +218,7 @@ impl<S: Scalar> MatrixEvaluator<S> {
                         &mut ldb as *mut __CLPK_integer,
                         &mut info as *mut __CLPK_integer,
                     );
-                },
+                }
                 Precision::Double => {
                     rlapack::ll::dgetrs_(
                         &mut trans as *mut c_char,
@@ -207,12 +231,14 @@ impl<S: Scalar> MatrixEvaluator<S> {
                         &mut ldb as *mut __CLPK_integer,
                         &mut info as *mut __CLPK_integer,
                     );
-                },
+                }
             }
         }
 
         if info < 0 {
-            return Err(MatrixError::BadArg{idx: (-info) as usize});
+            return Err(MatrixError::BadArg {
+                idx: (-info) as usize,
+            });
         }
 
         Ok(())
